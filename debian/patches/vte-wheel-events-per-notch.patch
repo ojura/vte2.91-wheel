@@ -1,0 +1,140 @@
+From: Juraj Oršulić <juraj.orsulic@fer.hr>
+Date: Sun, 8 Nov 2026 20:13:26 +0100
+Subject: Send several wheel events per mouse wheel notch in mouse tracking mode
+
+With mouse tracking on, VTE turns each whole unit of scroll delta into one
+wheel button event for the application. GTK reports a mouse wheel notch as a
+delta of 1, and a short touchpad movement gives the same delta, so the
+application receives identical events from both devices and cannot scroll
+the wheel faster without also coarsening touchpad scrolling.
+
+The scroll event now records whether it came from a mouse wheel (GTK 3: the
+source device is GDK_SOURCE_MOUSE; GTK 4: the scroll unit is
+GDK_SCROLL_UNIT_WHEEL). In mouse tracking mode a wheel delta is multiplied
+by VTE_WHEEL_EVENTS_PER_NOTCH (1 to 20, default 3), so one notch sends three
+events while touchpad deltas still send one event per unit. Scrollback and
+alternate-screen scrolling without mouse tracking are unchanged.
+---
+--- a/src/vte.cc
++++ b/src/vte.cc
+@@ -10030,6 +10030,34 @@ vte_cairo_get_clip_region(cairo_t *cr)
+ 
+ #endif /* VTE_GTK == 3 */
+ 
++/* The number of wheel button events that one mouse wheel notch sends to an
++ * application that has turned on mouse tracking. Such applications scroll a
++ * fixed number of lines per event, and a touchpad sends one event per unit of
++ * accumulated delta, so this sets the wheel's speed while touchpad scrolling
++ * keeps its resolution. VTE_WHEEL_EVENTS_PER_NOTCH sets it, from 1 to 20;
++ * the default is 3.
++ */
++static double
++wheel_events_per_notch()
++{
++        static double const value = [] {
++                auto constexpr fallback = 3.;
++                auto const env = g_getenv("VTE_WHEEL_EVENTS_PER_NOTCH");
++                if (env == nullptr)
++                        return fallback;
++
++                auto end = (char*){nullptr};
++                auto const parsed = g_ascii_strtod(env, &end);
++                if (end == env || *end != '\0' || !(parsed >= 1. && parsed <= 20.)) {
++                        g_warning("VTE_WHEEL_EVENTS_PER_NOTCH=\"%s\" is not a number from 1 to 20; using %g",
++                                  env, fallback);
++                        return fallback;
++                }
++                return parsed;
++        }();
++        return value;
++}
++
+ bool
+ Terminal::widget_mouse_scroll(vte::platform::ScrollEvent const& event)
+ {
+@@ -10038,7 +10066,15 @@ Terminal::widget_mouse_scroll(vte::platf
+ 	int button;
+ 
+         m_modifiers = event.modifiers();
+-        m_mouse_smooth_scroll_delta += event.dy();
++
++        /* With mouse tracking on, the code below turns each whole unit of
++         * accumulated delta into one wheel button event. A wheel notch is a
++         * delta of 1, the same as a short touchpad movement, so scale wheel
++         * deltas to make a notch send more events than the touchpad does. */
++        auto dy = event.dy();
++        if (m_mouse_tracking_mode != MouseTrackingMode::eNONE && event.is_wheel())
++                dy *= wheel_events_per_notch();
++        m_mouse_smooth_scroll_delta += dy;
+ 
+ 	/* If we're running a mouse-aware application, map the scroll event
+ 	 * to a button press on buttons four and five. */
+--- a/src/widget.cc
++++ b/src/widget.cc
+@@ -1256,8 +1256,11 @@ Widget::event_scroll(GtkEventControllerS
+         if (!event)
+                 return false;
+ 
++        auto const wheel = gtk_event_controller_scroll_get_unit(controller) ==
++                GDK_SCROLL_UNIT_WHEEL;
++
+         return terminal()->widget_mouse_scroll({gdk_event_get_modifier_state(event),
+-                                                dx, dy});
++                                                dx, dy, wheel});
+ }
+ 
+ void
+@@ -1754,8 +1757,17 @@ Widget::scroll_event_from_gdk(GdkEvent*
+                 }
+         }
+ 
++        /* A wheel notch and a touchpad movement both arrive as smooth
++         * deltas, so only the source device tells them apart. GDK's Wayland
++         * backend gives each axis source its own device (wheel:
++         * GDK_SOURCE_MOUSE, finger: GDK_SOURCE_TOUCHPAD, continuous:
++         * GDK_SOURCE_TRACKPOINT), and on X11 the source is the physical
++         * device. */
++        auto const source = gdk_event_get_source_device(event);
++        auto const wheel = source != nullptr &&
++                gdk_device_get_source(source) == GDK_SOURCE_MOUSE;
+ 
+-        return ScrollEvent{read_modifiers_from_gdk(event), dx, dy};
++        return ScrollEvent{read_modifiers_from_gdk(event), dx, dy, wheel};
+ }
+ 
+ #endif /* VTE_GTK == 3 */
+--- a/src/widget.hh
++++ b/src/widget.hh
+@@ -230,11 +230,13 @@ protected:
+ 
+         constexpr ScrollEvent(unsigned modifiers,
+                               double dx,
+-                              double dy) noexcept
++                              double dy,
++                              bool wheel = false) noexcept
+                 : EventBase{EventBase::Type::eMOUSE_SCROLL},
+                   m_modifiers{modifiers},
+                   m_dx{dx},
+-                  m_dy{dy}
++                  m_dy{dy},
++                  m_wheel{wheel}
+         {
+         }
+ 
+@@ -250,10 +252,16 @@ public:
+         constexpr auto dx()        const noexcept { return m_dx;        }
+         constexpr auto dy()        const noexcept { return m_dy;        }
+ 
++        /* True when the event came from a mouse wheel, where a delta of 1
++         * is one notch; false for touchpads, trackpoints and other sources
++         * that report continuous deltas. */
++        constexpr auto is_wheel()  const noexcept { return m_wheel;     }
++
+ private:
+         unsigned m_modifiers;
+         double m_dx;
+         double m_dy;
++        bool m_wheel;
+ }; // class ScrollEvent
+ 
+ class EventContext {
