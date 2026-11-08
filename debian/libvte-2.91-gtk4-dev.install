@@ -1,0 +1,6 @@
+usr/include/vte-2.91-gtk4
+usr/lib/*/libvte-2.91-gtk4.so
+usr/lib/*/pkgconfig/vte-2.91-gtk4.pc
+usr/share/gir-1.0/Vte-3.91.gir
+usr/share/vala/vapi/vte-2.91-gtk4.*
+#usr/share/glade/catalogs

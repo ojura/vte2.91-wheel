@@ -1,0 +1,6 @@
+version=4
+opts="searchmode=plain, uversionmangle=s/\.(alpha|beta|rc)/~$1/, downloadurlmangle=s|cache.json||" \
+https://download.gnome.org/sources/vte/cache.json \
+	[\d.]+[02468]/vte-([\d.]+)@ARCHIVE_EXT@
+#opts=filenamemangle=s/.*\///g \
+#  https://gitlab.gnome.org/GNOME/vte/tags?sort=updated_desc .*/archive/(\d+\.\d*[02468]\.\S+)/vte-\1\.tar\.gz

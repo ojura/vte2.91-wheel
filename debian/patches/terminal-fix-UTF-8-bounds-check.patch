@@ -1,0 +1,26 @@
+From: Christian Hergert <chergert@redhat.com>
+Date: Mon, 25 Mar 2024 13:12:58 -0700
+Subject: terminal: fix UTF-8 bounds check
+
+We do not want to dereference if we've reached the end of the chunk.
+This matches the bounds check above.
+
+Fixes: https://gitlab.gnome.org/GNOME/vte/-/issues/2769
+(cherry picked from commit aa405e4b0b2bf28bef2f7fd741881eaff92d1739)
+---
+ src/vte.cc | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/vte.cc b/src/vte.cc
+index b3bcc0a..55d2fe5 100644
+--- a/src/vte.cc
++++ b/src/vte.cc
+@@ -4071,7 +4071,7 @@ Terminal::process_incoming_utf8(ProcessingContext& context,
+                                         single_width_chars[single_width_chars_count++] = *ip;
+                                         ip++;
+                                 }
+-                                if (ip < iend || *ip >= 0x80) {
++                                if (ip < iend && *ip >= 0x80) {
+                                         /* Continue with UTF-8 (possibly including further ASCII) non-control chars. */
+                                         /* This is just a little bit slower than the ASCII loop above. */
+                                         vte::base::UTF8Decoder decoder;
