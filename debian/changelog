@@ -1,3 +1,13 @@
+vte2.91 (0.76.0-1ubuntu0.1+local1) noble; urgency=medium
+
+  * vte-wheel-events-per-notch.patch: in mouse tracking mode a mouse
+    wheel notch sends VTE_WHEEL_EVENTS_PER_NOTCH wheel events (default
+    3), while a touchpad still sends one event per unit of scroll delta,
+    so applications such as Claude Code and tmux scroll faster with the
+    wheel without coarser touchpad scrolling.
+
+ -- Juraj Oršulić <juraj.orsulic@fer.hr>  Sun, 08 Nov 2026 20:13:26 +0100
+
 vte2.91 (0.76.0-1ubuntu0.1) noble-security; urgency=medium
 
   * SECURITY UPDATE: DoS via window resize escape sequences
