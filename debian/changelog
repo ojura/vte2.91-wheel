@@ -1,3 +1,12 @@
+vte2.91 (0.76.0-1ubuntu0.1+local2) noble; urgency=medium
+
+  * vte-wheel-events-per-notch.patch: with GTK 4, recognise a mouse wheel
+    event by its scroll direction instead of its scroll unit, because
+    GDK's X11 backend reports touchpad deltas in wheel units too and the
+    patch scaled them like wheel notches.
+
+ -- Juraj Oršulić <juraj.orsulic@fer.hr>  Tue, 10 Nov 2026 17:50:43 +0100
+
 vte2.91 (0.76.0-1ubuntu0.1+local1) noble; urgency=medium
 
   * vte-wheel-events-per-notch.patch: in mouse tracking mode a mouse
