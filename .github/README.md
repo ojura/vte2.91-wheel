@@ -22,7 +22,13 @@ lines at a time.
 VTE can see which device an event came from. With GTK 3, the event's source
 device is `GDK_SOURCE_MOUSE` for a wheel and `GDK_SOURCE_TOUCHPAD` for a
 touchpad; on Wayland, GTK creates a separate device for each scroll source.
-With GTK 4, a wheel event's scroll unit is `GDK_SCROLL_UNIT_WHEEL`.
+With GTK 4, a wheel event has a scroll direction, while a touchpad event is a
+`GDK_SCROLL_SMOOTH` event.
+
+On X11, GTK identifies a touchpad by a device property that only the libinput
+X driver sets, and for other drivers it guesses from the device's name and
+axes. If it takes a touchpad under another driver, such as synaptics, for a
+mouse, the patch scales the touchpad's scrolling like a wheel's.
 
 While mouse tracking is on, the patch multiplies wheel deltas by
 `VTE_WHEEL_EVENTS_PER_NOTCH`, so by default one notch sends three events.
@@ -33,8 +39,9 @@ the arrow keys VTE sends on the alternate screen are the same.
 A program that scrolls one line per event now scrolls three lines per wheel
 notch and keeps one-line touchpad resolution. For Claude Code, leave
 `CLAUDE_CODE_SCROLL_SPEED` unset; in GNOME Terminal it then scrolls one line
-per event. Claude Code still accelerates fast wheel flicks on its own. For tmux copy mode, which
-scrolls five lines per event by default, use one line per event:
+per event. Claude Code still accelerates fast wheel flicks on its own. For
+tmux copy mode, which scrolls five lines per event by default, use one line
+per event:
 
 ```
 bind -T copy-mode    WheelUpPane   select-pane \; send-keys -X -N 1 scroll-up
@@ -50,8 +57,9 @@ more per notch; vim's default of three lines per event becomes nine per notch.
 
 `VTE_WHEEL_EVENTS_PER_NOTCH` sets the number of events per notch, from 1 to
 20. A fraction such as 2.5 alternates between two and three events. The
-terminal reads the variable once, when it starts. For any other value it
-prints a warning and uses 3.
+terminal reads the variable at the first wheel notch it sends to a program
+with mouse tracking on, and keeps that value until it exits. For any other
+value it prints a warning at that point and uses 3.
 
 GNOME Terminal's server is started by the systemd user manager and takes its
 environment from there. `systemctl --user set-environment
@@ -74,23 +82,33 @@ dpkg-buildpackage -us -uc -B -j"$(nproc)"
 sudo dpkg -i ../libvte-2.91-0_*.deb ../libvte-2.91-common_*.deb ../gir1.2-vte-2.91_*.deb
 ```
 
-Install the packages you already have installed (`dpkg -l '*vte*'`).
-`libvte-2.91-0` requires `libvte-2.91-common` of exactly the same version.
+The `dpkg -i` line installs the GTK 3 library, which GNOME Terminal uses, its
+common files, and the introspection data that Python programs embedding VTE
+use. Install every package from the build that you already have installed
+(`dpkg -l '*vte*'`), for example also `../libvte-2.91-gtk4-0_*.deb` if GTK 4
+terminals such as GNOME Console are installed. Both libraries require
+`libvte-2.91-common` of exactly the same version.
 
 A running terminal keeps the library it loaded. GNOME Terminal's server loads
 the new library the next time it starts: after all of its windows close, or at
 the next login. On Ubuntu, `gnome-terminal --disable-factory` opens a window
 on a new server right away.
 
-The local version `0.76.0-1ubuntu0.1+local1` sorts above Ubuntu's
-`0.76.0-1ubuntu0.1`, so apt keeps it until Ubuntu publishes a newer vte2.91.
+The local versions, `0.76.0-1ubuntu0.1+localN`, sort above Ubuntu's
+`0.76.0-1ubuntu0.1`, so apt keeps them until Ubuntu publishes a newer vte2.91.
 That update replaces the patched packages; rebase the patch onto the new
-source and rebuild. To go back to Ubuntu's packages:
+source and rebuild. To go back to Ubuntu's packages, name every package you
+installed from the build, such as `libvte-2.91-gtk4-0=0.76.0-1ubuntu0.1`, in
+addition to these three:
 
 ```sh
 sudo apt install --allow-downgrades libvte-2.91-0=0.76.0-1ubuntu0.1 \
     libvte-2.91-common=0.76.0-1ubuntu0.1 gir1.2-vte-2.91=0.76.0-1ubuntu0.1
 ```
+
+A patched package left out of the list requires the patched
+`libvte-2.91-common` exactly, so apt offers to remove it, together with every
+package that depends on it, instead of downgrading it.
 
 ## Testing
 
@@ -100,12 +118,22 @@ debian/wheel-test/check.sh <stock libdir> <patched libdir>
 
 Each libdir is a directory holding `libvte-2.91.so.0`, for example
 `usr/lib/x86_64-linux-gnu` inside the stock and the patched `libvte-2.91-0`
-package unpacked with `dpkg-deb -x`. The script runs each library in a
-headless mutter inside a private D-Bus session, so it does not touch the
-desktop. It injects wheel and touchpad scroll events through mutter's
-RemoteDesktop API and compares what a program in the terminal receives with
-the expected counts. A passing run prints only `ok` lines. It needs the
-`mutter`, `python3-gi`, `gir1.2-gtk-3.0` and `gir1.2-vte-2.91` packages.
+package unpacked with `dpkg-deb -x`. After the build above:
+
+```sh
+cd ..
+apt download libvte-2.91-0=0.76.0-1ubuntu0.1
+dpkg-deb -x libvte-2.91-0_0.76.0-1ubuntu0.1_amd64.deb stock
+dpkg-deb -x libvte-2.91-0_*+local*_amd64.deb patched
+vte2.91-wheel/debian/wheel-test/check.sh stock/usr/lib/x86_64-linux-gnu patched/usr/lib/x86_64-linux-gnu
+```
+
+The script runs each library in a headless mutter inside a private D-Bus
+session, so it does not touch the desktop. It injects wheel and touchpad
+scroll events through mutter's RemoteDesktop API and compares what a program
+in the terminal receives with the expected counts. A passing run prints only
+`ok` lines and the directory of its logs, and exits with status 0. It needs
+the `mutter`, `python3-gi`, `gir1.2-gtk-3.0` and `gir1.2-vte-2.91` packages.
 
 ## Licence
 

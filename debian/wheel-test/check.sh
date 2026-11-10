@@ -14,10 +14,16 @@
 # up. With mouse tracking on, VTE sends one wheel event per whole unit of
 # accumulated delta and keeps the remainder: the touchpad's upward 2.1 leaves
 # -0.1, which is why the smooth wheel phase gets 3 events from the stock
-# library (4 x 1 - 0.1), 11 with 3 events per notch (2 + 3 + 3 + 3) and 19 with
-# 5 (4 + 5 + 5 + 5). Without mouse tracking on the alternate screen, VTE sends
-# arrow keys, and the patch must leave those counts unchanged.
+# library (4 x 1 - 0.1), 11 with 3 events per notch (2 + 3 + 3 + 3), 19 with 5
+# (4 + 5 + 5 + 5) and 9 with 2.5 (2 + 2 + 3 + 2). With 2.5, wheel notches
+# alternate between 2 and 3 events. Without mouse tracking on the alternate
+# screen, VTE sends arrow keys, and the patch must leave those counts
+# unchanged.
 set -u
+if [ $# -ne 2 ]; then
+    echo "usage: $0 <stock libdir> <patched libdir>" >&2
+    exit 2
+fi
 here=$(dirname "$(readlink -f "$0")")
 stock=$(readlink -f "$1")
 patched=$(readlink -f "$2")
@@ -40,7 +46,8 @@ counts() {
 
 expect_lib() {
     local name=$1 libdir=$2
-    if ! grep -q "^LIB $libdir/libvte-2.91.so" "$out/$name.log"; then
+    if ! prefix="LIB $libdir/libvte-2.91.so" \
+            awk 'index($0, ENVIRON["prefix"]) == 1 {found = 1} END {exit !found}' "$out/$name.log"; then
         echo "FAIL $name: expected libvte from $libdir, the log says: $(grep '^LIB' "$out/$name.log")"
         failed=1
     fi
@@ -76,21 +83,29 @@ finger-down-20x5 0 10 0
 finger-up-7x3 2 0 0
 smooth-wheel-down-4x10 0 19 0'
 
+patched_track_2_5='wheel-down-4-notches 0 10 0
+wheel-up-2-notches 5 0 0
+finger-down-20x5 0 10 0
+finger-up-7x3 2 0 0
+smooth-wheel-down-4x10 0 9 0'
+
 run stock-track "$stock" track
 run patched-track "$patched" track
 run patched-track-5 "$patched" track VTE_WHEEL_EVENTS_PER_NOTCH=5
+run patched-track-2.5 "$patched" track VTE_WHEEL_EVENTS_PER_NOTCH=2.5
 run patched-track-invalid "$patched" track VTE_WHEEL_EVENTS_PER_NOTCH=abc
 run stock-altscreen "$stock" altscreen
 run patched-altscreen "$patched" altscreen
 
 for name in stock-track stock-altscreen; do expect_lib $name "$stock"; done
-for name in patched-track patched-track-5 patched-track-invalid patched-altscreen; do
+for name in patched-track patched-track-5 patched-track-2.5 patched-track-invalid patched-altscreen; do
     expect_lib $name "$patched"
 done
 
 expect_counts stock-track "$stock_track"
 expect_counts patched-track "$patched_track_3"
 expect_counts patched-track-5 "$patched_track_5"
+expect_counts patched-track-2.5 "$patched_track_2_5"
 expect_counts patched-track-invalid "$patched_track_3"
 if grep -q 'VTE_WHEEL_EVENTS_PER_NOTCH="abc" is not a number from 1 to 20; using 3' \
         "$out/patched-track-invalid.log.client"; then
@@ -105,7 +120,7 @@ alt_patched=$(counts patched-altscreen)
 if [ "$alt_stock" = "$alt_patched" ] && echo "$alt_stock" | awk '$1 ~ /^wheel-/ && $4 > 0 {n++} END {exit !(n == 2)}'; then
     echo "ok   altscreen arrow keys match the stock library"
 else
-    echo "FAIL altscreen: stock and patched differ, or the wheel phases sent no arrow keys"
+    echo "FAIL altscreen: stock and patched differ, or a wheel phase did not send arrow keys"
     diff <(echo "$alt_stock") <(echo "$alt_patched") | sed 's/^/     /'
     failed=1
 fi
