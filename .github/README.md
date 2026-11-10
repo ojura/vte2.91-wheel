@@ -113,27 +113,37 @@ package that depends on it, instead of downgrading it.
 ## Testing
 
 ```sh
-debian/wheel-test/check.sh <stock libdir> <patched libdir>
+debian/wheel-test/check.sh <stock root> <patched root>
 ```
 
-Each libdir is a directory holding `libvte-2.91.so.0`, for example
-`usr/lib/x86_64-linux-gnu` inside the stock and the patched `libvte-2.91-0`
-package unpacked with `dpkg-deb -x`. After the build above:
+Each root is a directory into which the `libvte-2.91-0`, `gir1.2-vte-2.91`,
+`libvte-2.91-gtk4-0` and `gir1.2-vte-3.91` packages of one build are unpacked
+with `dpkg-deb -x`. After the build above:
 
 ```sh
 cd ..
-apt download libvte-2.91-0=0.76.0-1ubuntu0.1
-dpkg-deb -x libvte-2.91-0_0.76.0-1ubuntu0.1_amd64.deb stock
-dpkg-deb -x libvte-2.91-0_*+local*_amd64.deb patched
-vte2.91-wheel/debian/wheel-test/check.sh stock/usr/lib/x86_64-linux-gnu patched/usr/lib/x86_64-linux-gnu
+mkdir stock-debs
+(cd stock-debs && apt download libvte-2.91-0=0.76.0-1ubuntu0.1 \
+    gir1.2-vte-2.91=0.76.0-1ubuntu0.1 libvte-2.91-gtk4-0=0.76.0-1ubuntu0.1 \
+    gir1.2-vte-3.91=0.76.0-1ubuntu0.1)
+for d in stock-debs/*.deb; do dpkg-deb -x "$d" stock; done
+for d in libvte-2.91-0_*+local*.deb gir1.2-vte-2.91_*+local*.deb \
+         libvte-2.91-gtk4-0_*+local*.deb gir1.2-vte-3.91_*+local*.deb; do
+    dpkg-deb -x "$d" patched
+done
+vte2.91-wheel/debian/wheel-test/check.sh stock patched
 ```
 
-The script runs each library in a headless mutter inside a private D-Bus
-session, so it does not touch the desktop. It injects wheel and touchpad
-scroll events through mutter's RemoteDesktop API and compares what a program
-in the terminal receives with the expected counts. A passing run prints only
-`ok` lines and the directory of its logs, and exits with status 0. It needs
-the `mutter`, `python3-gi`, `gir1.2-gtk-3.0` and `gir1.2-vte-2.91` packages.
+The script opens GTK 3 and GTK 4 VTE windows with each library in a headless
+mutter inside a private D-Bus session, so it does not touch the desktop. It
+injects wheel and touchpad scroll events through mutter's RemoteDesktop API
+and compares what a program in the terminal receives with the expected
+counts. After each group of events it types a marker key into the terminal,
+which splits the program's input into groups independently of timing. A
+passing run prints only `ok` lines and the directory of its logs, and exits
+with status 0. It needs the `mutter`, `python3-gi`, `gir1.2-gtk-3.0`,
+`gir1.2-gtk-4.0` and `dpkg-dev` packages. Headless mutter runs only Wayland,
+so the test does not cover X11.
 
 ## Licence
 
