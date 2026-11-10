@@ -13,8 +13,17 @@ source device is GDK_SOURCE_MOUSE; GTK 4: the event has a scroll direction
 other than GDK_SCROLL_SMOOTH). In mouse tracking mode a wheel delta is
 multiplied by VTE_WHEEL_EVENTS_PER_NOTCH (1 to 20, default 3), so one notch
 sends three events while touchpad deltas still send one event per unit.
-Scrollback and alternate-screen scrolling without mouse tracking are
-unchanged.
+When a wheel notch goes the other way from the fraction of a unit that
+earlier scrolling left in the accumulator, the fraction is dropped, so the
+notch still sends all of its events. Scrollback and alternate-screen
+scrolling without mouse tracking are unchanged.
+
+Under Xwayland, GTK 3 and GTK 4 cannot tell a touchpad from a wheel: all
+pointer input arrives through one device named "xwayland-pointer", which GTK
+classifies as a mouse, so touchpad scrolling there is multiplied as well.
+The same happens on X11 when a touchpad is driven by an X driver other than
+libinput and GTK takes it for a mouse. VTE_WHEEL_EVENTS_PER_NOTCH=1 turns
+the multiplier off for such a terminal.
 ---
 --- a/src/vte.cc
 +++ b/src/vte.cc
@@ -53,7 +62,7 @@ unchanged.
  bool
  Terminal::widget_mouse_scroll(vte::platform::ScrollEvent const& event)
  {
-@@ -10038,7 +10066,15 @@ Terminal::widget_mouse_scroll(vte::platf
+@@ -10038,7 +10066,22 @@ Terminal::widget_mouse_scroll(vte::platf
  	int button;
  
          m_modifiers = event.modifiers();
@@ -62,24 +71,37 @@ unchanged.
 +        /* With mouse tracking on, the code below turns each whole unit of
 +         * accumulated delta into one wheel button event. A wheel notch is a
 +         * delta of 1, the same as a short touchpad movement, so scale wheel
-+         * deltas to make a notch send more events than the touchpad does. */
++         * deltas to make a notch send more events than the touchpad does.
++         *
++         * The accumulator keeps the fraction of a unit that earlier scrolling
++         * left over. When a wheel notch goes the other way, that fraction
++         * would take one of the notch's events away, so drop it first. */
 +        auto dy = event.dy();
-+        if (m_mouse_tracking_mode != MouseTrackingMode::eNONE && event.is_wheel())
++        if (m_mouse_tracking_mode != MouseTrackingMode::eNONE && event.is_wheel()) {
 +                dy *= wheel_events_per_notch();
++                if (dy * m_mouse_smooth_scroll_delta < 0)
++                        m_mouse_smooth_scroll_delta = 0;
++        }
 +        m_mouse_smooth_scroll_delta += dy;
  
  	/* If we're running a mouse-aware application, map the scroll event
  	 * to a button press on buttons four and five. */
 --- a/src/widget.cc
 +++ b/src/widget.cc
-@@ -1256,8 +1256,14 @@ Widget::event_scroll(GtkEventControllerS
+@@ -1256,8 +1256,20 @@ Widget::event_scroll(GtkEventControllerS
          if (!event)
                  return false;
  
-+        /* GDK gives a mouse wheel event a scroll direction (it is a discrete
-+         * or a value120 event) and a touchpad event GDK_SCROLL_SMOOTH. The
-+         * scroll unit does not tell them apart, because GDK's X11 backend
-+         * reports touchpad deltas in GDK_SCROLL_UNIT_WHEEL as well. */
++        /* GDK makes a wheel step a discrete or value120 event, which has a
++         * scroll direction, and a movement on a device it recognises as a
++         * touchpad a GDK_SCROLL_SMOOTH event. On X11 it recognises a
++         * touchpad by the libinput X driver's "libinput Tapping Enabled"
++         * property, a touch class or the device name. Xwayland passes all
++         * pointer input through one device, "xwayland-pointer", that GDK
++         * takes for a mouse, so under Xwayland touchpad events have a
++         * direction and count as wheel events here. The scroll unit does not
++         * tell the devices apart either, because X11 touchpad deltas come in
++         * GDK_SCROLL_UNIT_WHEEL. */
 +        auto const wheel = gdk_scroll_event_get_direction(event) != GDK_SCROLL_SMOOTH;
 +
          return terminal()->widget_mouse_scroll({gdk_event_get_modifier_state(event),
@@ -88,7 +110,7 @@ unchanged.
  }
  
  void
-@@ -1754,8 +1760,22 @@ Widget::scroll_event_from_gdk(GdkEvent*
+@@ -1754,8 +1766,25 @@ Widget::scroll_event_from_gdk(GdkEvent*
                  }
          }
  
@@ -98,11 +120,14 @@ unchanged.
 +         * GDK_SOURCE_MOUSE, finger: GDK_SOURCE_TOUCHPAD, continuous:
 +         * GDK_SOURCE_TRACKPOINT) and picks the wheel device when the
 +         * compositor does not send an axis source. On X11 the source is the
-+         * physical device. GDK classifies it as GDK_SOURCE_TOUCHPAD by the
-+         * "libinput Tapping Enabled" property, which only the libinput X
-+         * driver sets; a touchpad under another driver, such as synaptics,
-+         * gets a guess from its name and axes and can end up as
-+         * GDK_SOURCE_MOUSE, which counts as a wheel here. */
++         * X input device. GDK classifies it as GDK_SOURCE_TOUCHPAD when it
++         * has the "libinput Tapping Enabled" property, which only the
++         * libinput X driver sets, or a touch class, and otherwise guesses from
++         * its name and axes. Xwayland passes all pointer input, touchpads
++         * included, through one device named "xwayland-pointer", which GDK
++         * classifies as GDK_SOURCE_MOUSE, and a touchpad under another X
++         * driver, such as synaptics, can end up as GDK_SOURCE_MOUSE too.
++         * Both count as wheels here. */
 +        auto const source = gdk_event_get_source_device(event);
 +        auto const wheel = source != nullptr &&
 +                gdk_device_get_source(source) == GDK_SOURCE_MOUSE;
