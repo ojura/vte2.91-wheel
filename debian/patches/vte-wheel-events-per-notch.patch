@@ -9,11 +9,12 @@ application receives identical events from both devices and cannot scroll
 the wheel faster without also coarsening touchpad scrolling.
 
 The scroll event now records whether it came from a mouse wheel (GTK 3: the
-source device is GDK_SOURCE_MOUSE; GTK 4: the scroll unit is
-GDK_SCROLL_UNIT_WHEEL). In mouse tracking mode a wheel delta is multiplied
-by VTE_WHEEL_EVENTS_PER_NOTCH (1 to 20, default 3), so one notch sends three
-events while touchpad deltas still send one event per unit. Scrollback and
-alternate-screen scrolling without mouse tracking are unchanged.
+source device is GDK_SOURCE_MOUSE; GTK 4: the event has a scroll direction
+other than GDK_SCROLL_SMOOTH). In mouse tracking mode a wheel delta is
+multiplied by VTE_WHEEL_EVENTS_PER_NOTCH (1 to 20, default 3), so one notch
+sends three events while touchpad deltas still send one event per unit.
+Scrollback and alternate-screen scrolling without mouse tracking are
+unchanged.
 ---
 --- a/src/vte.cc
 +++ b/src/vte.cc
@@ -71,12 +72,15 @@ alternate-screen scrolling without mouse tracking are unchanged.
  	 * to a button press on buttons four and five. */
 --- a/src/widget.cc
 +++ b/src/widget.cc
-@@ -1256,8 +1256,11 @@ Widget::event_scroll(GtkEventControllerS
+@@ -1256,8 +1256,14 @@ Widget::event_scroll(GtkEventControllerS
          if (!event)
                  return false;
  
-+        auto const wheel = gtk_event_controller_scroll_get_unit(controller) ==
-+                GDK_SCROLL_UNIT_WHEEL;
++        /* GDK gives a mouse wheel event a scroll direction (it is a discrete
++         * or a value120 event) and a touchpad event GDK_SCROLL_SMOOTH. The
++         * scroll unit does not tell them apart, because GDK's X11 backend
++         * reports touchpad deltas in GDK_SCROLL_UNIT_WHEEL as well. */
++        auto const wheel = gdk_scroll_event_get_direction(event) != GDK_SCROLL_SMOOTH;
 +
          return terminal()->widget_mouse_scroll({gdk_event_get_modifier_state(event),
 -                                                dx, dy});
@@ -84,7 +88,7 @@ alternate-screen scrolling without mouse tracking are unchanged.
  }
  
  void
-@@ -1754,8 +1757,17 @@ Widget::scroll_event_from_gdk(GdkEvent*
+@@ -1754,8 +1760,22 @@ Widget::scroll_event_from_gdk(GdkEvent*
                  }
          }
  
@@ -92,8 +96,13 @@ alternate-screen scrolling without mouse tracking are unchanged.
 +         * deltas, so only the source device tells them apart. GDK's Wayland
 +         * backend gives each axis source its own device (wheel:
 +         * GDK_SOURCE_MOUSE, finger: GDK_SOURCE_TOUCHPAD, continuous:
-+         * GDK_SOURCE_TRACKPOINT), and on X11 the source is the physical
-+         * device. */
++         * GDK_SOURCE_TRACKPOINT) and picks the wheel device when the
++         * compositor does not send an axis source. On X11 the source is the
++         * physical device. GDK classifies it as GDK_SOURCE_TOUCHPAD by the
++         * "libinput Tapping Enabled" property, which only the libinput X
++         * driver sets; a touchpad under another driver, such as synaptics,
++         * gets a guess from its name and axes and can end up as
++         * GDK_SOURCE_MOUSE, which counts as a wheel here. */
 +        auto const source = gdk_event_get_source_device(event);
 +        auto const wheel = source != nullptr &&
 +                gdk_device_get_source(source) == GDK_SOURCE_MOUSE;
@@ -111,7 +120,7 @@ alternate-screen scrolling without mouse tracking are unchanged.
                                double dx,
 -                              double dy) noexcept
 +                              double dy,
-+                              bool wheel = false) noexcept
++                              bool wheel) noexcept
                  : EventBase{EventBase::Type::eMOUSE_SCROLL},
                    m_modifiers{modifiers},
                    m_dx{dx},
