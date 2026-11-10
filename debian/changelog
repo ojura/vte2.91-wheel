@@ -1,3 +1,14 @@
+vte2.91 (0.76.0-1ubuntu0.1+local3) noble; urgency=medium
+
+  * vte-wheel-events-per-notch.patch: a wheel notch that goes the other
+    way from the fraction of a unit left in VTE's scroll accumulator
+    drops that fraction, so it sends all of its events instead of one
+    fewer. The patch comments now say that under Xwayland every touchpad
+    counts as a wheel, because Xwayland passes all pointer input through
+    one device that GTK classifies as a mouse.
+
+ -- Juraj Oršulić <juraj.orsulic@fer.hr>  Tue, 10 Nov 2026 20:53:40 +0100
+
 vte2.91 (0.76.0-1ubuntu0.1+local2) noble; urgency=medium
 
   * vte-wheel-events-per-notch.patch: with GTK 4, recognise a mouse wheel
