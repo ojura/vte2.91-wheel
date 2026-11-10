@@ -73,7 +73,7 @@ def end_setup():
         if wait_for_markers(1, 1.0):
             markers_sent = 1
             return
-    print(f"inject.py: none of {SETUP_ATTEMPTS} marker keys reached the program", file=sys.stderr)
+    print(f"inject.py: the program did not receive any of the {SETUP_ATTEMPTS} marker keys", file=sys.stderr)
     call("Stop", "()")
     sys.exit(1)
 

@@ -23,25 +23,43 @@ VTE can see which device an event came from. With GTK 3, the event's source
 device is `GDK_SOURCE_MOUSE` for a wheel and `GDK_SOURCE_TOUCHPAD` for a
 touchpad; on Wayland, GTK creates a separate device for each scroll source.
 With GTK 4, a wheel event has a scroll direction, while a touchpad event is a
-`GDK_SCROLL_SMOOTH` event.
+`GDK_SCROLL_SMOOTH` event. Both tests rely on GTK recognising the touchpad.
 
-On X11, GTK identifies a touchpad by a device property that only the libinput
-X driver sets, and for other drivers it guesses from the device's name and
-axes. If it takes a touchpad under another driver, such as synaptics, for a
-mouse, the patch scales the touchpad's scrolling like a wheel's.
+On X11, GTK recognises a touchpad by a device property that only the libinput
+X driver sets, by a touch class, or by the device's name. Under Xwayland,
+which runs X11 programs in a Wayland session, all pointer input, touchpads
+included, arrives through one device named `xwayland-pointer`, and GTK takes
+it for a mouse. A VTE terminal running there, for example one started with
+`GDK_BACKEND=x11`, therefore multiplies touchpad scrolling as well: the test
+measures 30 events where the stock library sends 10. A touchpad under an X
+driver other than libinput, such as synaptics, can be taken for a mouse in the
+same way. Set `VTE_WHEEL_EVENTS_PER_NOTCH=1` for such a terminal to turn the
+multiplier off. GNOME Terminal in a Wayland session runs as a Wayland client
+and tells the devices apart.
 
 While mouse tracking is on, the patch multiplies wheel deltas by
 `VTE_WHEEL_EVENTS_PER_NOTCH`, so by default one notch sends three events.
-Touchpad deltas still send one event per unit. Scrolling without mouse
-tracking does not change: the scrollback still moves the same distance, and
-the arrow keys VTE sends on the alternate screen are the same.
+Touchpad deltas still send one event per unit. VTE keeps the fraction of a
+unit that earlier scrolling left over; when a wheel notch goes the other way,
+the patch drops that fraction first, so the notch still sends three events.
+Scrolling without mouse tracking does not change: the scrollback still moves
+the same distance, and the arrow keys VTE sends on the alternate screen are
+the same.
 
 A program that scrolls one line per event now scrolls three lines per wheel
 notch and keeps one-line touchpad resolution. For Claude Code, leave
 `CLAUDE_CODE_SCROLL_SPEED` unset; in GNOME Terminal it then scrolls one line
-per event. Claude Code still accelerates fast wheel flicks on its own. For
-tmux copy mode, which scrolls five lines per event by default, use one line
-per event:
+per event. Claude Code also speeds up bursts of wheel events (checked in
+version 2.1.322): while events arrive less than 40 ms apart, it adds 0.3 to
+its lines-per-event multiplier for each event, up to 6. Because a notch now
+sends three events, notches less than 40 ms apart ramp up to 18 lines per
+notch, where one event per notch ramps up to 6. If fast flicks overshoot, set
+`VTE_WHEEL_EVENTS_PER_NOTCH=2`, or turn the acceleration off with
+`"wheelScrollAccelerationEnabled": false` in `~/.claude/settings.json`, which
+also turns it off for the touchpad.
+
+For tmux copy mode, which scrolls five lines per event by default, use one
+line per event:
 
 ```
 bind -T copy-mode    WheelUpPane   select-pane \; send-keys -X -N 1 scroll-up
@@ -142,8 +160,12 @@ counts. After each group of events it types a marker key into the terminal,
 which splits the program's input into groups independently of timing. A
 passing run prints only `ok` lines and the directory of its logs, and exits
 with status 0. It needs the `mutter`, `python3-gi`, `gir1.2-gtk-3.0`,
-`gir1.2-gtk-4.0` and `dpkg-dev` packages. Headless mutter runs only Wayland,
-so the test does not cover X11.
+`gir1.2-gtk-4.0` and `dpkg-dev` packages.
+
+The test also runs both GTK versions as X11 clients of the Xwayland server
+that headless mutter starts on a private display. There it checks the counts
+described above, including the multiplied touchpad scrolling, so that a change
+in that behaviour shows up. Native Xorg is untested.
 
 ## Licence
 
